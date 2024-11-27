@@ -1,11 +1,12 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
-import { contentModel, userModel } from "./db";
+import { contentModel, linkModel, userModel } from "./db";
 import mongoose from "mongoose";
 import dotenv from "dotenv"
 import { JWT_SECRET } from "./config";
 import { userMiddleware } from "./middleware";
+import { linkGenerator } from "./link";
 
 const app = express()
 app.use(express.json())
@@ -20,16 +21,15 @@ connectMongo()
 
 app.post("/api/v1/signup", async (req, res) => {
     const { username, password } = req.body
-    const hashedPassword = await bcrypt.hash(password, 5)
+    const hashedPassword = await bcrypt.hash(password, 5 as number)
     try {
         const user = await userModel.create({ username, password: hashedPassword })
         res.json({
-            Message: 'User is signed up'
+            message: 'User is signed up'
         })
     } catch (err) {
-        console.log('Error Creating User: ', err)
         res.status(411).json({
-            ErrorMessage: 'User is registered'
+            message: "User already exists"
         })
     }
 })
@@ -40,21 +40,44 @@ app.post("/api/v1/signin", async (req, res) => {
         const user = await userModel.findOne({ username })
         if (user) {
             const token = jwt.sign({ username, id: user._id }, JWT_SECRET)
-            res.json({
-                Token: token
-            })
+            const hashedPassword = await bcrypt.compare(password, user.password as string)
+            if (hashedPassword) {
+                res.json({
+                    token
+                })
+            } else {
+                res.status(404).json({
+                    message: "Incorrect Password"
+                })
+            }
         } else {
             res.status(411).json({
-                ErrorMessage: 'Invalid Credentials'
+                message: 'Invalid username'
             })
         }
 
     } catch (err) {
-        console.log('User Not Found: ', err)
         res.status(411).json({
-            ErrorMessage: "User Not Exists"
+            message: "User Not Exists"
         })
     }
+})
+
+app.get("/api/v1/brain/:shareLink", async (req, res) => {
+    const { shareLink } = req.params
+    const link = await linkModel.findOne({ hash: shareLink })
+    if (!link) {
+        res.status(411).json({
+            message: "No brain exists"
+        })
+        return 
+    }
+    const user = await userModel.findOne({ _id: link.userId})
+    const content = await contentModel.find({ userId: link.userId})
+    res.json({
+        username: user?.username,
+        content
+    })
 })
 
 app.use(userMiddleware)
@@ -65,11 +88,11 @@ app.post("/api/v1/content", async (req, res) => {
         // @ts-ignore
         const content = await contentModel.create({ title, link, userId: req.userId, tags: []})
         res.json({
-            Message: 'Content created successfully'
+            content
         })
     } catch (err) {
         res.json({
-            ErrorMessage: err
+            message: err
         })
     }
 })
@@ -82,7 +105,7 @@ app.get("/api/v1/content", async (req, res) => {
         res.send({ content })
     } catch (err) {
         res.status(411).json({
-            ErrorMessage: err
+            message: err
         })
     }
 })
@@ -95,26 +118,46 @@ app.delete("/api/v1/content", async (req, res) => {
         const content = await contentModel.deleteOne({ userId, _id: contentId })
         if ( content.deletedCount ) {
             res.json({
-                Message: 'Content is deleted'
+                message: 'Content is deleted'
             })
         } else {
             res.status(411).json({
-                ErrorMessage: "Content is not there"
+                message: "Content is not there"
             })
         }
     } catch (err) {
         res.status(411).json({
-            ErrorMessage: err
+            message: err
         })
     }
 })
 
-app.post("/api/v1/brain/share", (req, res) => {
+app.post("/api/v1/brain/share", async (req, res) => {
+    const { share }   = req.body
+    // @ts-ignore
+    const userId = req.userId
+    if (share) {
+        const isLink = await linkModel.findOne({ userId })
+        if (isLink) {
+            res.json({
+                link: isLink.hash
+            })
+            return 
+        }
+        const link = await linkModel.create({
+            userId,
+            hash: linkGenerator(10)
+        })
+        res.json({
+            link: link.hash
+        })
+    } else {
+        await linkModel.deleteOne({ userId })
+        res.json({
+            message: "Link removed successfully"
+        })
+    }
     
-})
-
-app.get("/api/v1/brain/:shareLink", (req, res) => {
-
 })
 
 app.listen(process.env.PORT)
