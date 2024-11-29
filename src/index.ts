@@ -7,9 +7,11 @@ import dotenv from "dotenv"
 import { JWT_SECRET } from "./config";
 import { userMiddleware } from "./middleware";
 import { linkGenerator } from "./link";
+import cors from "cors"
 
 const app = express()
 app.use(express.json())
+app.use(cors())
 
 dotenv.config()
 
@@ -21,15 +23,14 @@ connectMongo()
 
 app.post("/api/v1/signup", async (req, res) => {
     const { username, password } = req.body
-    const hashedPassword = await bcrypt.hash(password, 5 as number)
     try {
-        const user = await userModel.create({ username, password: hashedPassword })
+        const user = await userModel.create({ username, password })
         res.json({
             message: 'User is signed up'
         })
     } catch (err) {
         res.status(411).json({
-            message: "User already exists"
+            err
         })
     }
 })
@@ -37,19 +38,12 @@ app.post("/api/v1/signup", async (req, res) => {
 app.post("/api/v1/signin", async (req, res) => {
     const { username, password } = req.body
     try {
-        const user = await userModel.findOne({ username })
+        const user = await userModel.findOne({ username, password })
         if (user) {
             const token = jwt.sign({ username, id: user._id }, JWT_SECRET)
-            const hashedPassword = await bcrypt.compare(password, user.password as string)
-            if (hashedPassword) {
-                res.json({
-                    token
-                })
-            } else {
-                res.status(404).json({
-                    message: "Incorrect Password"
-                })
-            }
+            res.json({
+                token
+            })
         } else {
             res.status(411).json({
                 message: 'Invalid username'
@@ -83,10 +77,10 @@ app.get("/api/v1/brain/:shareLink", async (req, res) => {
 app.use(userMiddleware)
 
 app.post("/api/v1/content", async (req, res) => {
-    const { title, link } = req.body
+    const { title, link, type } = req.body
     try {
         // @ts-ignore
-        const content = await contentModel.create({ title, link, userId: req.userId, tags: []})
+        const content = await contentModel.create({ title, link, userId: req.userId, tags: [], type })
         res.json({
             content
         })
@@ -102,7 +96,7 @@ app.get("/api/v1/content", async (req, res) => {
     const userId = req.userId
     try {
         const content = await contentModel.find({ userId: userId }).populate("userId", "username")
-        res.send({ content })
+        res.json({ content })
     } catch (err) {
         res.status(411).json({
             message: err
